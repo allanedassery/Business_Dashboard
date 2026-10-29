@@ -1,0 +1,1408 @@
+    ---
+title: "Sample Project"
+subtitle: "MKTG - LEE"
+execute: 
+  echo: true
+  eval: true
+format:
+  html:
+    code-fold: false
+    self-contained: true
+jupyter: python3
+---
+
+
+# Executive Summary
+
+# Introduction & Data Set Used
+
+The used car market is highly competitive, with buyers evaluating many attributes—such as mileage, brand, engine size, and fuel efficiency—before making a purchase. Dealerships must make strategic decisions about pricing, brand positioning, and target audiences to remain competitive.
+
+This project analyzes nearly 100,000 used-car listings to answer three key marketing questions:
+
+Pricing Optimization: Which features most influence used-car prices?
+
+Market Segmentation: What customer or vehicle segments exist, and how can dealerships target them?
+
+Brand Positioning: How are automotive brands positioned in the market, and where do competitive opportunities exist?
+
+Using Exploratory Data Analysis, K-means clustering, predictive modeling, and visualization tools, the project develops insights that support data-driven pricing, inventory planning, and marketing strategy.
+
+Data Set Used:
+The dataset comes from a Kaggle collection of used-car listings, containing 98,837 observations and 10 variables from multiple online marketplaces.
+
+Variables
+Categorical: Brand, Model, Transmission, Fuel Type
+Numeric: Year, Price, Mileage, Tax, MPG, Engine Size
+
+Key Summary Statistics:
+Average price: $16,797
+Average mileage: 23,094 miles
+Most common fuel type: Petrol
+Transmission: 57% manual, 43% automatic
+
+This dataset offers a comprehensive view of the used-car market and provides the necessary detail to evaluate pricing patterns, consumer preferences, and brand positioning.
+
+
+- Full marketing analytics workflow using POLARS + sklearn + matplotlib
+
+Data Preprocessing and Exploratory Data Analysis (EDA)
+
+```{python}
+
+# Importing Libraries
+
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import os
+import plotly.express as px
+import polars as pl
+
+from sklearn.preprocessing import StandardScaler
+from sklearn.model_selection import train_test_split
+from sklearn.cluster import KMeans
+from sklearn.linear_model import LinearRegression
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.metrics import mean_squared_error, r2_score
+from sklearn.metrics import classification_report, confusion_matrix, accuracy_score
+from sklearn.decomposition import PCA
+import joblib
+from sklearn.pipeline import Pipeline
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler, OneHotEncoder
+from sklearn.compose import ColumnTransformer
+from sklearn.pipeline import Pipeline
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.svm import SVR
+from sklearn.linear_model import LogisticRegression
+
+
+```
+
+
+```{python}
+
+# Loading and Cleaning Data with Polars
+
+# Load data
+cars = pl.read_csv("Final_dataset.csv", ignore_errors= True)
+
+cars = cars.drop_nulls()
+
+# View the first few rows of the data
+cars.head() 
+
+# Summary of dataset
+# Reason: Quick overview of the cleaned dataset.
+
+print("Shape:", cars.shape)     # number of rows and columns
+print("\nColumn types:")
+print(cars.schema)              # check data types
+
+print("\nSummary statistics:")
+
+cars.describe()
+
+cars.head() 
+
+```
+
+## Executive Dashboard
+```{python}
+from plotly.subplots import make_subplots
+import plotly.graph_objects as go
+
+# Calculate key metrics
+total_vehicles = cars.shape[0]
+avg_price = cars["price"].mean()
+median_price = cars["price"].median()
+avg_mileage = cars["mileage"].mean()
+avg_mpg = cars["mpg"].mean()
+num_brands = cars["Brand"].n_unique()
+avg_age = 2025 - cars["year"].mean()
+
+# Prepare data for charts
+brand_counts = cars.group_by("Brand").agg(pl.len().alias("count")).sort("count", descending=True).head(6)
+fuel_counts = cars.group_by("fuelType").agg(pl.len().alias("count")).sort("count", descending=True)
+trans_counts = cars.group_by("transmission").agg(pl.len().alias("count"))
+
+# Define color palette
+colors = {
+    "primary": "#4361EE",
+    "secondary": "#3A0CA3", 
+    "accent1": "#7209B7",
+    "accent2": "#F72585",
+    "accent3": "#4CC9F0",
+    "success": "#06D6A0",
+    "warning": "#FFD166",
+    "dark": "#1A1A2E",
+    "light": "#F8F9FA",
+    "gradient": ["#4361EE", "#3A0CA3", "#7209B7", "#F72585", "#4CC9F0", "#06D6A0"]
+}
+
+# Create subplot layout
+fig = make_subplots(
+    rows=3, cols=3,
+    specs=[
+        [{"type": "indicator"}, {"type": "indicator"}, {"type": "indicator"}],
+        [{"type": "indicator"}, {"type": "indicator"}, {"type": "indicator"}],
+        [{"type": "bar"}, {"type": "pie"}, {"type": "pie"}]
+    ],
+    subplot_titles=(
+        "", "", "",
+        "", "", "",
+        "<b>Top Brands by Inventory</b>", "<b>Fuel Type Mix</b>", "<b>Transmission Split</b>"
+    ),
+    vertical_spacing=0.10,
+    horizontal_spacing=0.06,
+    row_heights=[0.28, 0.28, 0.44]
+)
+
+# Row 1: KPI Indicators
+fig.add_trace(go.Indicator(
+    mode="number",
+    value=total_vehicles,
+    title={
+        "text": "<b style='font-size:16px;color:#1A1A2E'>Total Vehicles</b><br><span style='font-size:11px;color:#6c757d'>Listed in Market</span>",
+        "font": {"size": 14}
+    },
+    number={"font": {"size": 42, "color": colors["primary"], "family": "Arial Black"}, "valueformat": ","},
+    domain={"x": [0, 1], "y": [0, 1]}
+), row=1, col=1)
+
+fig.add_trace(go.Indicator(
+    mode="number",
+    value=avg_price,
+    title={
+        "text": "<b style='font-size:16px;color:#1A1A2E'>Average Price</b><br><span style='font-size:11px;color:#6c757d'>Market Mean</span>",
+        "font": {"size": 14}
+    },
+    number={"font": {"size": 42, "color": colors["success"], "family": "Arial Black"}, "prefix": "$", "valueformat": ",.0f"}
+), row=1, col=2)
+
+fig.add_trace(go.Indicator(
+    mode="number",
+    value=median_price,
+    title={
+        "text": "<b style='font-size:16px;color:#1A1A2E'>Median Price</b><br><span style='font-size:11px;color:#6c757d'>Typical Vehicle</span>",
+        "font": {"size": 14}
+    },
+    number={"font": {"size": 42, "color": colors["accent3"], "family": "Arial Black"}, "prefix": "$", "valueformat": ",.0f"}
+), row=1, col=3)
+
+# Row 2: More KPIs
+fig.add_trace(go.Indicator(
+    mode="number",
+    value=avg_mileage,
+    title={
+        "text": "<b style='font-size:16px;color:#1A1A2E'>Avg Mileage</b><br><span style='font-size:11px;color:#6c757d'>Miles Driven</span>",
+        "font": {"size": 14}
+    },
+    number={"font": {"size": 42, "color": colors["warning"], "family": "Arial Black"}, "valueformat": ",.0f"}
+), row=2, col=1)
+
+fig.add_trace(go.Indicator(
+    mode="number",
+    value=num_brands,
+    title={
+        "text": "<b style='font-size:16px;color:#1A1A2E'>Brands</b><br><span style='font-size:11px;color:#6c757d'>In Market</span>",
+        "font": {"size": 14}
+    },
+    number={"font": {"size": 42, "color": colors["accent1"], "family": "Arial Black"}}
+), row=2, col=2)
+
+fig.add_trace(go.Indicator(
+    mode="number",
+    value=round(avg_age, 1),
+    title={
+        "text": "<b style='font-size:16px;color:#1A1A2E'>Avg Vehicle Age</b><br><span style='font-size:11px;color:#6c757d'>Years Old</span>",
+        "font": {"size": 14}
+    },
+    number={"font": {"size": 42, "color": colors["accent2"], "family": "Arial Black"}, "suffix": " yrs"}
+), row=2, col=3)
+
+# Row 3: Charts
+# Top Brands Bar Chart - Horizontal with gradient
+brand_list = brand_counts["Brand"].to_list()
+count_list = brand_counts["count"].to_list()
+
+fig.add_trace(go.Bar(
+    y=brand_list[::-1],
+    x=count_list[::-1],
+    orientation="h",
+    marker=dict(
+        color=count_list[::-1],
+        colorscale=[[0, "#4CC9F0"], [0.5, "#4361EE"], [1, "#3A0CA3"]],
+        line=dict(width=0),
+        cornerradius=5
+    ),
+    text=[f"{x:,}" for x in count_list[::-1]],
+    textposition="outside",
+    textfont=dict(size=11, color="#1A1A2E", family="Arial")
+), row=3, col=1)
+
+# Fuel Type Donut - Enhanced
+fig.add_trace(go.Pie(
+    labels=fuel_counts["fuelType"].to_list(),
+    values=fuel_counts["count"].to_list(),
+    hole=0.55,
+    marker=dict(
+        colors=["#4361EE", "#06D6A0", "#FFD166", "#F72585", "#4CC9F0"],
+        line=dict(color="#FFFFFF", width=2)
+    ),
+    textinfo="percent",
+    textfont=dict(size=12, color="white", family="Arial Black"),
+    hovertemplate="<b>%{label}</b><br>Count: %{value:,}<br>Share: %{percent}<extra></extra>",
+    rotation=90
+), row=3, col=2)
+
+# Transmission Donut - Enhanced
+fig.add_trace(go.Pie(
+    labels=trans_counts["transmission"].to_list(),
+    values=trans_counts["count"].to_list(),
+    hole=0.55,
+    marker=dict(
+        colors=["#7209B7", "#4CC9F0"],
+        line=dict(color="#FFFFFF", width=2)
+    ),
+    textinfo="percent+label",
+    textfont=dict(size=12, color="white", family="Arial"),
+    hovertemplate="<b>%{label}</b><br>Count: %{value:,}<br>Share: %{percent}<extra></extra>",
+    rotation=45
+), row=3, col=3)
+
+# Update layout
+fig.update_layout(
+    height=800,
+    width=1200,
+    title=dict(
+        text="<b>🚗 USED CAR MARKET DASHBOARD</b><br><span style='font-size:14px;color:#6c757d;font-weight:normal'>Strategic Market Overview & Key Performance Indicators</span>",
+        font=dict(size=26, color="#1A1A2E", family="Arial Black"),
+        x=0.5,
+        xanchor="center",
+        y=0.97
+    ),
+    showlegend=False,
+    margin=dict(l=60, r=60, t=120, b=40),
+    paper_bgcolor="#FFFFFF",
+    plot_bgcolor="#FFFFFF",
+    font=dict(family="Arial", color="#1A1A2E")
+)
+
+# Style subplot titles
+for annotation in fig['layout']['annotations']:
+    annotation['font'] = dict(size=13, color="#1A1A2E", family="Arial")
+
+# Update axes for bar chart
+fig.update_xaxes(
+    showgrid=True,
+    gridcolor="#E9ECEF",
+    gridwidth=1,
+    zeroline=False,
+    tickfont=dict(size=10),
+    title_text="",
+    row=3, col=1
+)
+fig.update_yaxes(
+    showgrid=False,
+    tickfont=dict(size=11, color="#1A1A2E"),
+    title_text="",
+    row=3, col=1
+)
+
+# Add subtle border effect with shapes
+fig.add_shape(
+    type="rect",
+    xref="paper", yref="paper",
+    x0=0, y0=0, x1=1, y1=1,
+    line=dict(color="#E9ECEF", width=2)
+)
+
+# Add section divider line
+fig.add_shape(
+    type="line",
+    xref="paper", yref="paper",
+    x0=0.02, y0=0.42, x1=0.98, y1=0.42,
+    line=dict(color="#E9ECEF", width=1, dash="dot")
+)
+
+fig.show()
+
+
+
+```
+
+
+## Transmission & Fuel Type Price Matrix
+```{python}
+trans_fuel_price = cars.group_by(["transmission", "fuelType"]).agg(
+    pl.mean("price").alias("avg_price")
+).to_pandas().pivot(index="fuelType", columns="transmission", values="avg_price")
+
+# Custom vibrant color scale
+custom_colors = [
+    [0.0, "#0D47A1"],
+    [0.33, "#00BCD4"],
+    [0.66, "#4CAF50"],
+    [1.0, "#FFEB3B"]
+]
+
+fig = px.imshow(
+    trans_fuel_price,
+    text_auto=".0f",
+    title="Price Matrix: Transmission vs Fuel Type",
+    labels={"x": "Transmission", "y": "Fuel Type", "color": "Avg Price ($)"},
+    color_continuous_scale=custom_colors
+)
+
+fig.update_layout(
+    height=500,
+    width=1000,
+    title=dict(
+        text="<b>Price Matrix: Transmission vs Fuel Type</b>",
+        font=dict(size=20),
+        x=0.5,
+        xanchor="center"
+    ),
+    font=dict(family="Arial", size=14),
+    coloraxis_colorbar=dict(
+        title="Avg Price ($)",
+        tickprefix="$",
+        tickformat=",.0f",
+        len=0.8,
+        thickness=15
+    ),
+    margin=dict(l=120, r=60, t=80, b=60)
+)
+
+fig.update_xaxes(
+    title_text="Transmission Type",
+    title_font=dict(size=14, color="#333"),
+    tickfont=dict(size=13)
+)
+
+fig.update_yaxes(
+    title_text="Fuel Type",
+    title_font=dict(size=14, color="#333"),
+    tickfont=dict(size=13)
+)
+
+fig.update_traces(
+    textfont=dict(size=11, color="white", family="Arial"),
+    texttemplate="$%{z:,.0f}",
+    hovertemplate="<b>%{y}</b> + <b>%{x}</b><br>Avg Price: <b>$%{z:,.0f}</b><extra></extra>"
+)
+
+fig.show()
+
+```
+
+Key Findings:
+
+Hybrid vehicles command the highest prices across both transmission types, indicating strong market demand for fuel-efficient technology. Automatic hybrids are priced significantly higher than manual hybrids, reflecting their positioning as premium, convenience-focused vehicles.
+
+Automatic transmission consistently commands a price premium over manual transmission across all fuel types. This reflects consumer preference for convenience and the higher manufacturing costs associated with automatic gearboxes.
+Diesel vehicles show strong pricing in the automatic segment, likely driven by demand in the commercial and long-distance driving markets where diesel's fuel efficiency is valued.
+
+Petrol vehicles represent the most affordable segment, particularly in manual transmission, making them accessible entry-level options for budget-conscious consumers.
+
+Electric vehicles (if present in data) show competitive pricing, reflecting market maturation and increased adoption.
+
+Marketing Implications:
+
+1. Dealerships should prioritize automatic hybrids and diesels for higher profit margins
+2. Budget-focused campaigns should target manual petrol vehicles to attract first-time buyers
+3. Premium positioning strategies work best for automatic transmission across all fuel types
+4. Inventory decisions should balance high-margin automatics with volume-driven manual petrols
+
+
+```{python}
+## Price Distribution Analysis
+# Filter out extreme outliers for better visualization
+cars_filtered = cars.filter(pl.col("price") <= 50000)
+
+fig = px.histogram(
+    cars_filtered.to_pandas(),
+    x="price",
+    nbins=50,
+    title="Price Distribution in Used Car Market",
+    labels={"price": "Price ($)", "count": "Number of Vehicles"},
+    color_discrete_sequence=["#3498db"]
+)
+
+fig.add_vline(
+    x=cars_filtered["price"].mean(), 
+    line_dash="dash", 
+    line_color="red",
+    annotation_text=f"Mean: ${cars_filtered['price'].mean():,.0f}",
+    annotation_position="top right"
+)
+
+fig.add_vline(
+    x=cars_filtered["price"].median(), 
+    line_dash="dot", 
+    line_color="green",
+    annotation_text=f"Median: ${cars_filtered['price'].median():,.0f}",
+    annotation_position="top left"
+)
+
+fig.update_layout(
+    height=500,
+    width=1000,
+    title=dict(
+        text="<b>Price Distribution in Used Car Market</b>",
+        font=dict(size=20),
+        x=0.5,
+        xanchor="center"
+    ),
+    xaxis=dict(
+        title="Price ($)",
+        tickprefix="$",
+        tickformat=",.0f"
+    ),
+    yaxis=dict(title="Number of Vehicles"),
+    margin=dict(l=80, r=50, t=80, b=60)
+)
+
+fig.show()
+
+# Note how many cars were filtered
+total = cars.shape[0]
+filtered = cars_filtered.shape[0]
+print(f"Showing {filtered:,} of {total:,} vehicles ({filtered/total*100:.1f}%) - filtered to prices ≤ $50,000")
+
+```
+
+Key Findings:
+
+Right-skewed distribution
+The used car market shows a classic right-skewed pattern, with the majority of vehicles concentrated in the lower price ranges and a tail extending toward higher prices. This indicates a market dominated by affordable, mass-market vehicles.
+
+Mean vs Median gap 
+The mean price is higher than the median, confirming the presence of high-priced outliers (luxury/premium vehicles) that pull the average upward. The median provides a more accurate representation of what a "typical" used car costs.
+
+Price Concentration 
+The bulk of inventory falls within the $10,000–$25,000 range, representing the sweet spot for used car buyers seeking value and reliability.
+
+Market accessibility 
+A significant portion of vehicles are priced under $15,000, indicating strong inventory availability for budget-conscious consumers and first-time buyers.
+
+Premium segment 
+Vehicles priced above $35,000 represent a smaller but notable segment, likely consisting of newer models, luxury brands, or low-mileage vehicles.
+
+Marketing Implications:
+
+Pricing Strategy
+Dealerships can focus inventory and marketing efforts on the $10K–$25K range where demand is highest.
+
+Segmented Campaigns 
+Create distinct marketing approaches for budget buyers (under $15K) vs premium buyers (above $35K).
+
+Competitive Positioning
+Vehicles priced near the median offer the best balance of competitiveness and margin potential.
+
+Financing Options
+Promote financing heavily for vehicles above the median price to expand buyer accessibility.
+
+```{python}
+# Select features for clustering
+cluster_features = ['year', 'price', 'mileage', 'tax', 'mpg', 'engineSize']
+cars_cluster = cars.select(cluster_features).drop_nulls()
+
+# Create clustering pipeline
+def create_kmeans_pipeline(n_clusters, random_state=42):
+    return Pipeline([
+        ('scaler', StandardScaler()),
+        ('kmeans', KMeans(n_clusters=n_clusters, random_state=random_state, n_init=10))
+    ])
+```
+
+
+
+We use Customer segmentation model to investigate the data set.
+
+```{python}
+
+# Select relevant features for clustering
+
+cars_bases = cars.select([
+ #'Brand',
+ #'model',
+ 'year',
+ 'price',
+ #'transmission',
+ 'mileage',
+ #'fuelType',
+ 'tax',
+ 'mpg',
+ 'engineSize'])
+
+```
+
+
+# Creating K Means clustering pipeline
+```{python}
+
+
+def create_pipeline(num_clusters, random_seed = 42):
+    """
+    Creates a machine learning pipeline with a scaler and KMeans.
+    """
+    pipeline = Pipeline([
+        ('scaler', StandardScaler()),
+        ('kmeans', KMeans(n_clusters=num_clusters, random_state=random_seed))
+    ])
+    return pipeline
+```
+
+
+# Determining Optimal clusters through Elbow Plot
+```{python}
+# Determining Optimal clusters through Elbow Plot
+
+def calculate_totwithinss(data, k):
+    kmeans_pipeline = create_pipeline(k, random_seed=10)
+    kmeans_pipeline.fit(data)
+    return kmeans_pipeline['kmeans'].inertia_
+
+# Calculate tot.withinss for different values of k
+k_values = range(1, 10)
+totwithinss_values = [calculate_totwithinss(cars_bases, k) for k in k_values]
+
+# Create a DataFrame for results
+kmeans_results = pl.DataFrame(
+    {'num_clusters': k_values,
+     'tot_withinss': totwithinss_values})
+
+# Plot the elbow method using Plotly Express
+elbow_plot = px.line(
+    data_frame = kmeans_results,
+    x = 'num_clusters',
+    y = 'tot_withinss', 
+    markers = True,
+    labels = {
+        'num_clusters': 'Number of Clusters', 'tot_withinss': 'Total Within SS'
+        },
+    title = 'Elbow Method for Optimal k')
+
+elbow_plot.show()
+
+```
+
+Based on the elbow method, four clusters were chosen because they provide the best balance between model simplicity and meaningful separation of distinct vehicle groups in the used car market.
+
+# K Means Clustering
+```{python}
+
+# Final K-Means Clustering
+
+# Choose the number of clusters based on the elbow method
+optimal_k = 4
+
+# Run K-means clustering
+
+cars_kmeans_pipeline = create_pipeline(optimal_k)
+cars_kmeans_pipeline.fit(cars_bases)
+
+
+# Add cluster assignments to the original data
+cars_with_clusters = cars.with_columns(
+    pl.Series(
+        "segment_number",
+        cars_kmeans_pipeline['kmeans'].labels_ + 1
+        ).cast(pl.Utf8).cast(pl.Categorical)  # Make cluster labels 1-indexed
+)
+
+cars_with_clusters.head()
+```
+
+
+# Segment Description
+
+Analyzing the segments based on mean values of key metrics and the number of observations in each segment.
+
+```{python}
+# Segment Description
+
+# Calculating summary statistics for each segment
+
+segment_summary = cars_with_clusters.group_by('segment_number').agg(
+    [
+        pl.mean('price').alias('mean_price'),
+        pl.mean('mileage').alias('mean_mileage'),
+        pl.mean('engineSize').alias('mean_engineSize'),
+        pl.len().alias('n')
+    ]
+)
+
+segment_summary
+```
+
+## Customer Segmentation Conclusion
+
+The customer segmentation analysis successfully identified four clusters,through the elbow method.  
+
+Cluster 1: Represents mid-range cars with moderate prices (~$14,765), average mileage (~15,146), and smaller engines (~1.42 L). Likely balanced options between affordability and performance.
+
+Cluster 2: Consists of budget or older vehicles with the lowest mean price (~$11,232) but highest mileage (~57,132), indicating heavy usage and smaller engine capacity (~1.96 L).
+
+Cluster 3: Represents premium or high-performance vehicles, having the highest mean price (~$32,028), lowest mileage (~9,039), and largest engine size (~2.31 L) — suggesting newer or luxury cars. 
+
+Cluster 4: Also economy-oriented, with a similar low price (~$11,198) and moderate mileage (~35,594). Slightly smaller engines (~1.52 L), possibly compact cars.
+
+
+## PCA Visualization of K-Means Clustering
+```{python}
+# --- PCA Visualization of Clusters ---
+from sklearn.decomposition import PCA
+
+# Standardize the features manually for PCA
+scaler = StandardScaler()
+scaled_features = scaler.fit_transform(cars_bases.to_pandas())
+
+# Reduce to 2 dimensions
+pca = PCA(n_components=2)
+pca_components = pca.fit_transform(scaled_features)
+
+# Add PCA components + cluster labels to dataframe
+pca_df = pd.DataFrame({
+    "PC1": pca_components[:, 0],
+    "PC2": pca_components[:, 1],
+    "Cluster": cars_kmeans_pipeline['kmeans'].labels_ + 1
+})
+
+# Plot
+fig = px.scatter(
+    pca_df,
+    x="PC1", 
+    y="PC2",
+    color="Cluster",
+    title="PCA Visualization of K-Means Clusters",
+    opacity=0.8
+)
+
+fig.show()
+
+```
+
+
+
+## Cluster Boxplots (Price, Mileage, Engine Size) 
+```{python}
+# Helps explain cluster behavior: Differences across clusters for each key numeric variable
+# Convert Polars DF to Pandas for Plotly
+
+from plotly.subplots import make_subplots
+import plotly.graph_objs as go
+
+# Convert Polars to pandas
+cars_pd = cars_with_clusters.to_pandas()
+
+# Features for the dashboard
+features = ["price", "mileage", "engineSize"]
+
+# Create a subplot grid (1 row per feature)
+fig = make_subplots(
+    rows=len(features),
+    cols=1,
+    shared_xaxes=False,
+    vertical_spacing=0.10,
+    subplot_titles=[
+        f"{feature.capitalize()} Distribution Across Clusters"
+        for feature in features
+    ]
+)
+
+# Add boxplots for each feature
+for i, feature in enumerate(features):
+    fig.add_trace(
+        go.Box(
+            x=cars_pd["segment_number"],
+            y=cars_pd[feature],
+            name=feature,
+            boxmean=True,
+            marker=dict(color="#6A5ACD"),
+            opacity=0.7
+        ),
+        row=i + 1,
+        col=1
+    )
+
+# Update layout
+fig.update_layout(
+    height=1100,
+    width=900,
+    title="Cluster Comparison Dashboard: Price, Mileage, Engine Size",
+    template="plotly_white",
+    showlegend=False
+)
+
+# Update axis labels
+for i in range(len(features)):
+    fig.update_xaxes(title_text="Cluster Segment", row=i + 1, col=1)
+    fig.update_yaxes(title_text="Value", row=i + 1, col=1)
+
+# Show dashboard
+fig.show()
+
+```
+
+1. Price Distribution Across Clusters 
+
+Cluster 3: Shows the highest prices and the largest spread, with many extreme high-value outliers. This segment represents premium buyers willing to spend significantly more. Ideal for luxury products, premium packages, and high-value upselling.
+
+Cluster 1: Falls into the mid-range with stable price behavior. These customers look for value but are not price-sensitive, making them good targets for balanced offers, loyalty programs, and add-on bundles.
+
+Cluster 4: Shows lower-mid pricing, with a relatively tight distribution. These customers prefer affordable but decent-quality options. Best suited for discount campaigns, value packs, and entry-level products.
+
+Cluster 2: Has the lowest median prices and limited high-price purchases. This segment is the most budget-conscious, responding well to price cuts, seasonal promotions, and low-cost alternatives.
+
+2. Mileage Distribution Across Clusters
+
+Cluster 2: Has the highest mileage and the widest spread, indicating older or heavily used vehicles. This segment is ideal for maintenance plans, repair services, and high-wear part replacements.
+
+Cluster 4: Shows moderate-to-high mileage, suggesting frequent drivers. They are strong candidates for routine service reminders, safety checks, and periodic maintenance offers.
+
+Cluster 1: Displays mid-range mileage, reflecting balanced usage. They fit well with standard service intervals, tune-up promotions, and value-based maintenance packages.
+
+Cluster 3: Has the lowest mileage, indicating newer or lightly used vehicles. Marketing should emphasize premium upgrades, accessories, detailing services, and extended warranties, not heavy repair-oriented messaging.
+
+3. Enginesize Distribution Across Clusters 
+
+Cluster 3: Shows the largest engine sizes, including many high-end outliers. This indicates customers who prefer powerful, performance-oriented vehicles. Ideal for marketing premium performance packages, fuel additives, and high-end service plans.
+
+Cluster 1: Has the smallest and most compact engine sizes, with a tight distribution around lower engine ranges. These customers favor economical, fuel-efficient vehicles, making them good targets for budget maintenance services and efficiency-focused offers.
+
+Cluster 4: Shows moderate engine sizes, indicating a balance between power and efficiency. They represent a versatile group suited for general service promotions, mid-range upgrades, and value-focused maintenance.
+
+Cluster 2: Has small-to-mid engine sizes with some higher outliers. This group mixes practicality with occasional preference for slightly more powerful vehicles. Marketing can focus on balanced service packages and flexible upgrade options.
+
+
+## Targeting
+```{python}
+car = cars_with_clusters.to_pandas()
+
+X = car[['year','price','mileage','tax','mpg','engineSize']]
+y = car['segment_number'].astype(int)
+
+```
+
+
+## bar plot for feature importance
+```{python}
+# Train/Test Split
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y, test_size=0.3, random_state=42, stratify=y
+)
+
+# Build model pipeline
+clf_pipeline = Pipeline([
+    ('scaler', StandardScaler()),
+    ('model', LogisticRegression(max_iter=2000, multi_class='auto'))
+])
+
+# Fit model
+clf_pipeline.fit(X_train, y_train)
+```
+
+## Overall Feature Importance for Car Segment Classification
+```{python}
+import matplotlib.pyplot as plt
+import numpy as np
+
+# Get coefficients
+coef = clf_pipeline.named_steps['model'].coef_
+features = X.columns
+
+# Average absolute importance across all clusters
+mean_importance = np.mean(np.abs(coef), axis=0)
+
+# Plot
+plt.figure(figsize=(8,5))
+plt.barh(features, mean_importance)
+plt.xlabel("Importance (|Coefficient|)")
+plt.title("Overall Feature Importance for Car Segment Classification")
+plt.gca().invert_yaxis()
+plt.show()
+
+plt.figure(figsize=(8,5))
+plt.barh(features, mean_importance, 
+         color=plt.cm.viridis(mean_importance / max(mean_importance)))
+plt.xlabel("Importance (|Coefficient|)")
+plt.title("Feature Importance (Gradient Bar Chart)")
+plt.gca().invert_yaxis()
+plt.show()
+
+
+```
+
+Feature Importance – Key Insights 
+
+The feature importance chart explains which characteristics most strongly differentiate one car segment from another. In this dataset, age (year), usage (mileage), and valuation (price) are the primary drivers of segment identity, while attributes like tax, engine size, and mpg play secondary roles.
+
+1. Year is the most influential feature, indicating newer vs. older cars strongly drive segment differences.
+
+2. Mileage is highly important, showing usage/wear heavily affects how cars are grouped.
+
+3. Price also plays a major role, confirming that market valuation aligns closely with segment classification.
+
+4. Tax and engine size have moderate influence, suggesting ownership cost and performance characteristics help differentiate clusters but are secondary.
+
+5. MPG has the lowest importance, meaning fuel efficiency does not significantly impact segment distinctions in this dataset.
+
+Overall, the model shows that age, usage, and valuation are the strongest determinants of car segment identity.
+
+
+## Binary Outcome Prediction
+## Premium vs Non-Premium Cars
+```{python}
+# Create binary target: Premium vs Non-Premium
+car_bin = cars_with_clusters.to_pandas()
+car_bin['premium_flag'] = (car_bin['segment_number'] == '3').astype(int)
+
+# Define features
+X = car_bin[['year','price','mileage','tax','mpg','engineSize']]
+y = car_bin['premium_flag']
+
+# Split data
+from sklearn.model_selection import train_test_split
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y, test_size=0.3, random_state=42, stratify=y)
+
+# Model
+from sklearn.linear_model import LogisticRegression
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler
+
+binary_pipe = Pipeline([
+    ('scaler', StandardScaler()),
+    ('model', LogisticRegression())
+])
+
+binary_pipe.fit(X_train, y_train)
+
+# Predictions
+y_pred = binary_pipe.predict(X_test)
+
+from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
+
+print("Accuracy:", accuracy_score(y_test, y_pred))
+print("Classification Report:\n", classification_report(y_test, y_pred))
+confusion_matrix(y_test, y_pred)
+
+```
+
+The logistic regression model accurately predicts premium vs. non-premium cars (98% accuracy), with very low misclassification rates, making it highly reliable for pricing, segmentation, and inventory strategy
+
+```{python}
+import seaborn as sns
+import matplotlib.pyplot as plt
+from sklearn.metrics import confusion_matrix
+
+cm = confusion_matrix(y_test, y_pred)
+
+plt.figure(figsize=(6,4))
+sns.heatmap(cm, annot=True, fmt='d', cmap='Blues',
+            xticklabels=['Non-Premium','Premium'],
+            yticklabels=['Non-Premium','Premium'])
+plt.title("Confusion Matrix for Premium Car Classification")
+plt.xlabel("Predicted")
+plt.ylabel("Actual")
+plt.show()
+
+```
+
+```{python}
+import seaborn as sns
+import matplotlib.pyplot as plt
+from sklearn.metrics import confusion_matrix
+
+importance = binary_pipe.named_steps['model'].coef_[0]
+features = X.columns
+
+imp_df = pd.DataFrame({
+    "feature": features,
+    "importance": importance
+}).sort_values(by="importance", ascending=False)
+
+plt.figure(figsize=(7,4))
+sns.barplot(data=imp_df, x="importance", y="feature", palette="viridis")
+plt.title("Feature Importance for Premium Prediction (Logistic Regression)")
+plt.xlabel("Coefficient Value")
+plt.ylabel("Feature")
+plt.show()
+
+
+```
+
+Premium customers pay for performance
+Higher price + powerful engines = strong indicators of premium segment demand.
+
+Vehicle age and condition matter
+Newer, lower-mileage cars have higher premium chances → important for valuation and inventory decisions.
+
+Efficiency vs luxury trade-off
+Cars with high fuel efficiency (MPG) are less likely premium → useful insight for targeting eco-buyers vs luxury buyers.
+
+Useful for pricing optimization
+Dealers can adjust pricing and marketing strategies by understanding which features drive premium classification.
+
+### Continuous Outcome Prediction
+
+# Downloading libraries
+```{python}
+import polars as pl
+import pandas as pd
+from sklearn.model_selection import train_test_split
+from sklearn.compose import ColumnTransformer
+from sklearn.preprocessing import StandardScaler, OneHotEncoder
+from sklearn.pipeline import Pipeline
+from sklearn.linear_model import LinearRegression
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.svm import SVR
+import plotly.express as px
+import numpy as np
+```
+
+
+# Traget & Features
+```{python}
+# Target variable
+target = "price"
+
+# Feature lists
+categorical_features = ["Brand", "transmission", "fuelType"]
+numeric_features = ["year", "mileage", "tax", "mpg", "engineSize"]
+
+features = categorical_features + numeric_features
+
+```
+
+
+
+# Train-test & Split(Continuous Outcome Prediction) (Polars to Pandas)
+```{python}
+
+# Convert entire Polars DF into Pandas for the split
+cars_pd = cars.to_pandas()
+
+train_pd, test_pd = train_test_split(cars_pd, test_size=0.3, random_state=11109)
+
+# Convert back to Polars
+train_df = pl.DataFrame(train_pd)
+test_df = pl.DataFrame(test_pd)
+
+```
+
+
+# Preprocessing
+```{python}
+preprocessor = ColumnTransformer(
+    transformers=[
+        ('num', StandardScaler(), numeric_features),
+        ('cat', OneHotEncoder(handle_unknown='ignore'), categorical_features)
+    ]
+)
+
+```
+
+
+# ML Pipelines (COP)
+```{python}
+
+lr_pipeline = Pipeline([
+    ('preprocessor', preprocessor),
+    ('model', LinearRegression())
+])
+
+rf_pipeline = Pipeline([
+    ('preprocessor', preprocessor),
+    ('model', RandomForestRegressor(n_estimators=120, random_state=11109))
+])
+
+svm_pipeline = Pipeline([
+    ('preprocessor', preprocessor),
+    ('model', SVR())
+])
+
+```
+
+
+# Train and Predict (COP)
+```{python}
+
+# Fit and predict
+X_train = train_df.select(features).to_pandas()
+y_train = train_df[target].to_pandas()
+
+X_test = test_df.select(features).to_pandas()
+y_test = test_df[target].to_pandas()
+
+
+```
+
+## Linear Regression (Continous Outcome Prediction)
+```{python}
+
+lr_pipeline.fit(X_train, y_train)
+
+train_df = train_df.with_columns(
+    pl.Series("lr_pred", lr_pipeline.predict(X_train))
+)
+
+test_df = test_df.with_columns(
+    pl.Series("lr_pred", lr_pipeline.predict(X_test))
+)
+
+```
+
+## Random Forest (Continuous Outcome Prediction)
+```{python}
+
+rf_pipeline.fit(X_train, y_train)
+
+train_df = train_df.with_columns(
+    pl.Series("rf_pred", rf_pipeline.predict(X_train))
+)
+
+test_df = test_df.with_columns(
+    pl.Series("rf_pred", rf_pipeline.predict(X_test))
+)
+
+```
+
+## RMSE
+```{python}
+
+def rmse(actual, pred):
+    return np.sqrt(np.mean((actual - pred)**2))
+
+rmse_lr = rmse(test_df[target].to_numpy(), test_df["lr_pred"].to_numpy())
+rmse_rf = rmse(test_df[target].to_numpy(), test_df["rf_pred"].to_numpy())
+
+print("RMSE Results:")
+print(f"Linear Regression RMSE: {rmse_lr:.2f}")
+print(f"Random Forest RMSE: {rmse_rf:.2f}")
+
+```
+
+## Visualization
+```{python}
+# Simple scatter plot
+
+def plot_pred(df, pred_col, title):
+    fig = px.scatter(
+        df,
+        x=target,
+        y=pred_col,
+        title=title,
+        labels={"price": "Actual Price", pred_col: "Predicted Price"}
+    )
+    fig.show()
+
+plot_pred(test_df, "lr_pred", "Linear Regression: Actual vs Predicted Price")
+plot_pred(test_df, "rf_pred", "Random Forest: Actual vs Predicted Price")
+
+```
+
+## Interpretation of Visualizations
+
+1. Linear Regression Plot:
+
+The points are widely scattered and do not follow a strong straight-line pattern.
+
+This means the linear regression model is struggling to capture the relationship between the input features and the actual bike price.
+
+Many predictions are far from the actual values, with noticeable under- and over-prediction.
+
+This indicates that the relationship in the data is non-linear, and linear regression is too simple for this dataset.
+
+2. Random Forest Plot
+
+The points lie much closer to a diagonal upward trend, meaning predictions follow actual prices more accurately.
+
+The scatter is tighter, showing less error and better model fit compared to linear regression.
+
+Random Forest captures complex nonlinear patterns in the dataset, which is why it performs significantly better.
+
+Overall, Random Forest provides more reliable and stable predictions for bike price.
+
+
+### BRAND POSITIONING ANALYSIS
+```{python}
+
+# Summary stats by brand
+brand_summary = (
+    cars.group_by("Brand")
+        .agg([
+            pl.mean("price").alias("avg_price"),
+            pl.mean("mileage").alias("avg_mileage"),
+            pl.mean("engineSize").alias("avg_engineSize"),
+            pl.mean("mpg").alias("avg_mpg"),
+            pl.len().alias("count")
+        ])
+        .sort("avg_price", descending=True)
+)
+
+brand_summary
+
+```
+
+
+## Visualization: Average Price by Brand
+```{python}
+
+fig = px.bar(
+    brand_summary.to_pandas(),
+    x="Brand",
+    y="avg_price",
+    title="Average Price by Brand",
+    labels={"avg_price": "Average Price ($)"},
+)
+fig.show()
+
+```
+
+
+## Visualization: Market Share By Brand (Based on count of listing)
+```{python}
+fig = px.pie(
+    brand_summary.to_pandas(),
+    names="Brand",
+    values="count",
+    title="Market Share by Brand (Count of Listings)"
+)
+fig.show()
+
+```
+
+## Brand Premium Score (Price vs Engine Size Adjusted)
+```{python}
+!pip install statsmodels
+import statsmodels.api as sm
+import pandas as pd
+
+df = cars.to_pandas()
+
+X = df[['engineSize', 'mileage', 'year']]
+X = sm.add_constant(X)
+y = df['price']
+
+model = sm.OLS(y, X).fit()
+df["expected_price"] = model.predict(X)
+df["premium_score"] = df["price"] - df["expected_price"]
+
+brand_premium = df.groupby("Brand")["premium_score"].mean().sort_values(ascending=False)
+brand_premium
+
+
+```
+
+
+## Brand premium score visualisation
+```{python}
+import matplotlib.pyplot as plt
+
+# Convert to DataFrame for easier plotting
+bp = brand_premium.reset_index()
+bp.columns = ["Brand", "PremiumScore"]
+
+plt.figure(figsize=(10, 5))
+bars = plt.bar(bp["Brand"], bp["PremiumScore"], color=["green" if x > 0 else "red" for x in bp["PremiumScore"]])
+
+plt.axhline(0, color='black', linewidth=1)
+plt.title("Brand Premium Score: Actual Price vs Expected Price")
+plt.ylabel("Average Premium Score (£)")
+plt.xlabel("Brand")
+plt.xticks(rotation=45)
+
+# Annotate each bar with its value
+for bar in bars:
+    yval = bar.get_height()
+    plt.text(
+        bar.get_x() + bar.get_width()/2, 
+        yval + (200 if yval > 0 else -200), 
+        f"{yval:.0f}", 
+        ha="center", 
+        va="bottom" if yval > 0 else "top"
+    )
+
+plt.tight_layout()
+plt.show()
+
+```
+
+
+This chart compares each brand’s actual price with its expected price, generating a “premium score.” Audi and Mercedes command the highest positive premiums, indicating customers are willing to pay substantially more than expected, reflecting strong brand equity. VW and BMW show slight positive premiums, suggesting moderate brand strength. Ford and Skoda fall into mild negative territory, while Toyota, Hyundai, and especially Vauxhall have large negative premiums, meaning they sell for significantly less than expected. This signals weaker brand perception or strong price–value competition.
+
+Marketing Implication:
+Premium brands like Audi and Mercedes should continue leveraging their strong brand equity in messaging and maintain premium pricing strategies. VW and BMW can reinforce quality cues to further strengthen willingness to pay. Brands with negative premiums (Toyota, Hyundai, Vauxhall) should focus on improving perceived value through reliability messaging, product upgrades, or repositioning efforts. Vauxhall, with the deepest negative premium, may need rebranding or pricing adjustments to rebuild consumer trust and competitiveness.
+
+## Holistic Premium Score Model (Using ALL Features)
+
+```{python}
+import statsmodels.api as sm
+import pandas as pd
+
+# Convert Polars → Pandas
+df = cars.to_pandas()
+
+# --- Features for predicting expected price ---
+X = df[['engineSize', 'mileage', 'year', 'mpg', 'tax']]
+X = sm.add_constant(X)
+
+y = df['price']
+
+# --- Fit OLS regression model ---
+model = sm.OLS(y, X).fit()
+
+# --- Predict expected fair value ---
+df["expected_price"] = model.predict(X)
+
+# --- Premium Score (Actual - Expected Price) ---
+df["premium_score"] = df["price"] - df["expected_price"]
+
+# --- Brand-level average premium score ---
+brand_premium = (
+    df.groupby("Brand")["premium_score"]
+      .mean()
+      .sort_values(ascending=False)
+)
+
+brand_premium
+
+```
+
+```{python}
+import statsmodels.api as sm
+import pandas as pd
+import plotly.express as px
+
+# Convert Polars → Pandas
+df = cars.to_pandas()
+
+# Features for predicting expected price
+X = df[['engineSize', 'mileage', 'year', 'mpg', 'tax']]
+X = sm.add_constant(X)
+y = df['price']
+
+# Fit OLS regression
+model = sm.OLS(y, X).fit()
+
+# Compute premium score
+df["expected_price"] = model.predict(X)
+df["premium_score"] = df["price"] - df["expected_price"]
+
+# Brand-level premium score
+brand_premium = (
+    df.groupby("Brand")["premium_score"]
+      .mean()
+      .sort_values(ascending=False)
+      .reset_index()
+)
+
+# --- Premium Score Bar Chart ---
+fig = px.bar(
+    brand_premium,
+    x="Brand",
+    y="premium_score",
+    title="Brand Premium Score (Actual Price - Expected Price)",
+    labels={"premium_score": "Avg Premium (£)"},
+    color="premium_score",
+    color_continuous_scale="RdYlGn",   # Red → low premium, Green → high premium
+    text="premium_score",
+)
+
+fig.update_traces(texttemplate='%{text:.0f}', textposition="outside")
+fig.update_layout(xaxis_tickangle=45, height=500)
+fig.show()
+
+```
+
+This chart compares each brand’s actual price with its expected price, generating a “premium score.” Audi and Mercedes command the highest positive premiums, indicating customers are willing to pay substantially more than expected, reflecting strong brand equity. VW and BMW show slight positive premiums, suggesting moderate brand strength. Ford and Skoda fall into mild negative territory, while Toyota, Hyundai, and especially Vauxhall have large negative premiums, meaning they sell for significantly less than expected. This signals weaker brand perception or strong price–value competition.
+
+Marketing Implication:
+Premium brands like Audi and Mercedes should continue leveraging their strong brand equity in messaging and maintain premium pricing strategies. VW and BMW can reinforce quality cues to further strengthen willingness to pay. Brands with negative premiums (Toyota, Hyundai, Vauxhall) should focus on improving perceived value through reliability messaging, product upgrades, or repositioning efforts. Vauxhall, with the deepest negative premium, may need rebranding or pricing adjustments to rebuild consumer trust and competitiveness.
+
+## Visualization: Brand Positioning ( Price Vs Mileage)
+```{python}
+## To understand Premium VS Budget Brand Positioning
+
+fig = px.scatter(
+    brand_summary.to_pandas(),
+    x="avg_mileage",
+    y="avg_price",
+    text="Brand",
+    title="Brand Positioning Map: Price vs Mileage",
+    labels={"avg_mileage": "Average Mileage", "avg_price": "Average Price"},
+)
+
+fig.update_traces(textposition="top center")
+fig.show()
+
+```
+
+
+This map compares average price versus average mileage for major car brands. BMW, Audi, and Mercedes remain positioned as premium brands, offering higher mileage but at significantly higher prices. VW sits in the mid-range with moderate pricing and mileage. Brands like Toyota, Hyundai, Ford, and Vauxhall cluster in the affordable segment, offering competitive mileage at lower price points. Skoda shows relatively lower mileage for its price, indicating a value–perception gap.
+
+Marketing Implication:
+Luxury brands should emphasize their balance of performance, comfort, and mileage to reinforce premium value. Mid-market brands like VW can market themselves as practical upgrades that offer strong mileage at reasonable prices. Budget brands (Toyota, Hyundai, Ford, Vauxhall) should highlight fuel efficiency and long-term cost savings for value-conscious buyers. Skoda may need to improve its mileage perception or adjust pricing to stay competitive in the value-driven segment.
+
+## Visualization:  Brand Positioning (Price vs Engine) 
+```{python}
+
+# Performance vs Economy orientation.
+fig = px.scatter(
+    brand_summary.to_pandas(),
+    x="avg_engineSize",
+    y="avg_price",
+    text="Brand",
+    title="Brand Positioning Map: Price vs Engine Size",
+    labels={"avg_engineSize": "Average Engine Size (L)", "avg_price": "Average Price"},
+)
+
+fig.update_traces(textposition="top center")
+fig.show()
+
+```
+
+This brand-positioning map compares average price vs. average engine size across car brands. BMW, Mercedes, and Audi occupy the premium segment, offering larger engines at significantly higher prices. Mid-market brands like VW sit in the center with moderate pricing and engine size. Meanwhile, Ford, Toyota, Hyundai, Skoda, and Vauxhall cluster in the affordable, smaller-engine segment, appealing to value-focused consumers. Overall, the chart highlights a clear separation between luxury and mass-market brands based on engine performance and price.
+
+Marketing Implication:
+The map highlights a clear premium vs. value split. Luxury brands (BMW, Mercedes, Audi) should continue emphasizing performance, engineering quality, and prestige to justify their higher prices. Mid-range brands like VW can position themselves as balanced choices combining reliability and moderate performance. Budget-focused brands (Toyota, Hyundai, Ford, Vauxhall) should reinforce value, fuel efficiency, and affordability. This segmentation helps brands tailor messaging, product strategy, and competitive positioning to their target consumer groups.
+
+
+## ## Price Distribution Analysis
+```{python}
+
+```
+
+
+# Results and Findings
+```{python}
+
+```
+
+# Research Implications
+## Managerical Recommendations
+1.
+2.
+3.
+
+## Actionable Plans
+1.
+2.
+3.
+
+# Conclusion
+
+## Works Cited
+```{python}
+
+
+import nbformat
+
+
+```
+
